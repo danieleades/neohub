@@ -228,9 +228,9 @@ struct IgnoreAllCertificateSecurity(WebPkiSupportedAlgorithms);
 impl danger::ServerCertVerifier for IgnoreAllCertificateSecurity {
     fn verify_server_cert(
         &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
+        _end_entity: &CertificateDer,
+        _intermediates: &[CertificateDer],
+        _server_name: &ServerName,
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> std::result::Result<danger::ServerCertVerified, Error> {
@@ -241,7 +241,7 @@ impl danger::ServerCertVerifier for IgnoreAllCertificateSecurity {
     fn verify_tls12_signature(
         &self,
         message: &[u8],
-        cert: &CertificateDer<'_>,
+        cert: &CertificateDer,
         dss: &DigitallySignedStruct,
     ) -> std::result::Result<danger::HandshakeSignatureValid, Error> {
         verify_tls12_signature(message, cert, dss, &self.0)
@@ -250,7 +250,7 @@ impl danger::ServerCertVerifier for IgnoreAllCertificateSecurity {
     fn verify_tls13_signature(
         &self,
         message: &[u8],
-        cert: &CertificateDer<'_>,
+        cert: &CertificateDer,
         dss: &DigitallySignedStruct,
     ) -> std::result::Result<danger::HandshakeSignatureValid, Error> {
         verify_tls13_signature(message, cert, dss, &self.0)
