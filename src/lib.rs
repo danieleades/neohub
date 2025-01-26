@@ -52,14 +52,14 @@ impl Client {
         Self::new(env_var("NEOHUB_URL")?, env_var("NEOHUB_TOKEN")?)
     }
 
-    pub fn new(url: impl ToString, token: impl ToString) -> Result<Self> {
+    pub fn new(url: String, token: String) -> Result<Self> {
         Self::new_opts(url, token, Opts::default())
     }
 
-    pub fn new_opts(url: impl ToString, token: impl ToString, opts: Opts) -> Result<Self> {
-        Ok(Client {
-            url: url.to_string(),
-            token: token.to_string(),
+    pub const fn new_opts(url: String, token: String, opts: Opts) -> Result<Self> {
+        Ok(Self {
+            url,
+            token,
             conn: None,
             opts,
         })
@@ -276,6 +276,6 @@ async fn connect(url: &str) -> Result<WsStream> {
     Ok(conn)
 }
 
-fn env_var(key: &'static str) -> Result<String> {
+fn env_var(key: &str) -> Result<String> {
     std::env::var(key).with_context(|| anyhow!("env var required: {key:?}"))
 }
