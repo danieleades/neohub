@@ -5,8 +5,8 @@ use serde_json::Value;
 #[tokio::main]
 async fn main() -> Result<()> {
     pretty_env_logger::init();
-    let mut client = neohub::Client::from_env()?;
     println!("Attempting to connect...");
+    let mut client = neohub::Client::from_env()?.connect().await?;
     println!(
         "{:?}",
         client

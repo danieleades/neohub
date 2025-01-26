@@ -27,54 +27,56 @@ pub use live_data::LiveData;
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-pub struct Client {
+pub struct ClientBuilder {
     url: String,
     token: String,
-    conn: Option<WsStream>,
-    opts: Opts,
+    timeout: Duration,
 }
 
-#[non_exhaustive]
-pub struct Opts {
-    pub timeout: Duration,
-}
-
-impl Default for Opts {
-    fn default() -> Self {
+impl ClientBuilder {
+    fn new(url: String, token: String) -> Self {
         Self {
+            url,
+            token,
             timeout: Duration::from_secs(15),
         }
     }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    pub async fn connect(self) -> Result<Client> {
+        let conn = connect(&self.url).await?;
+        Ok(Client {
+            token: self.token,
+            conn,
+            timeout: self.timeout,
+        })
+    }
+}
+
+pub struct Client {
+    token: String,
+    conn: WsStream,
+    timeout: Duration,
 }
 
 impl Client {
-    pub fn from_env() -> Result<Self> {
-        Self::new(env_var("NEOHUB_URL")?, env_var("NEOHUB_TOKEN")?)
+    pub fn from_env() -> Result<ClientBuilder> {
+        Ok(ClientBuilder::new(
+            env_var("NEOHUB_URL")?,
+            env_var("NEOHUB_TOKEN")?,
+        ))
     }
 
-    pub fn new(url: impl ToString, token: impl ToString) -> Result<Self> {
-        Self::new_opts(url, token, Opts::default())
-    }
-
-    pub fn new_opts(url: impl ToString, token: impl ToString, opts: Opts) -> Result<Self> {
-        Ok(Client {
-            url: url.to_string(),
-            token: token.to_string(),
-            conn: None,
-            opts,
-        })
-    }
-
-    #[inline]
-    async fn ensure_connected(&mut self) -> Result<&mut WsStream> {
-        if self.conn.is_none() {
-            self.conn = Some(connect(&self.url).await?);
-        }
-        Ok(self.conn.as_mut().expect("we just set it"))
+    pub fn build(url: String, token: String) -> ClientBuilder {
+        ClientBuilder::new(url, token)
     }
 
     pub async fn raw_message(&mut self, msg: &str) -> Result<(String, String)> {
-        timeout(self.opts.timeout, self.raw_message_inner(msg))
+        timeout(self.timeout, self.raw_message_inner(msg))
             .await
             .with_context(|| "timeout sending raw message")?
     }
@@ -92,14 +94,12 @@ impl Client {
         });
         let to_send = serde_json::to_string(&outer)?;
 
-        let conn = self.ensure_connected().await?;
-        debug!("sending: {}", to_send);
-
-        conn.feed(Message::Text(to_send)).await?;
-        conn.flush().await?;
+        self.conn.feed(Message::Text(to_send)).await?;
+        self.conn.flush().await?;
 
         debug!("receiving");
-        let buf = conn
+        let buf = self
+            .conn
             .next()
             .await
             .ok_or_else(|| anyhow!("no response received to command"))?
@@ -126,7 +126,7 @@ impl Client {
         arg: &str,
     ) -> Result<T> {
         let (_, resp) = self
-            .raw_message(&format!("{{'{}':'{}'}}", command, arg))
+            .raw_message(&format!("{{'{command}':'{arg}'}}"))
             .await?;
         serde_json::from_str(&resp).with_context(|| anyhow!("reading {:?}", resp))
     }
@@ -146,17 +146,10 @@ impl Client {
         })
     }
 
-    pub async fn disconnect(&mut self) -> Result<()> {
-        let conn = match self.conn.as_mut() {
-            None => return Ok(()),
-            Some(conn) => conn,
-        };
-
-        let shutdown_result = timeout(self.opts.timeout, conn.close(None))
+    pub async fn disconnect(mut self) -> Result<()> {
+        let shutdown_result = timeout(self.timeout, self.conn.close(None))
             .await
             .with_context(|| "timeout disconnecting");
-
-        self.conn = None;
 
         Ok(shutdown_result??)
     }
@@ -164,7 +157,7 @@ impl Client {
 
 #[inline]
 fn serialise_void(command: &str) -> String {
-    format!("{{'{}':0}}", command)
+    format!("{{'{command}':0}}")
 }
 
 #[derive(Deserialize, Debug)]
@@ -228,9 +221,9 @@ struct IgnoreAllCertificateSecurity(WebPkiSupportedAlgorithms);
 impl danger::ServerCertVerifier for IgnoreAllCertificateSecurity {
     fn verify_server_cert(
         &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
+        _end_entity: &CertificateDer,
+        _intermediates: &[CertificateDer],
+        _server_name: &ServerName,
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> std::result::Result<danger::ServerCertVerified, Error> {
@@ -241,7 +234,7 @@ impl danger::ServerCertVerifier for IgnoreAllCertificateSecurity {
     fn verify_tls12_signature(
         &self,
         message: &[u8],
-        cert: &CertificateDer<'_>,
+        cert: &CertificateDer,
         dss: &DigitallySignedStruct,
     ) -> std::result::Result<danger::HandshakeSignatureValid, Error> {
         verify_tls12_signature(message, cert, dss, &self.0)
@@ -250,7 +243,7 @@ impl danger::ServerCertVerifier for IgnoreAllCertificateSecurity {
     fn verify_tls13_signature(
         &self,
         message: &[u8],
-        cert: &CertificateDer<'_>,
+        cert: &CertificateDer,
         dss: &DigitallySignedStruct,
     ) -> std::result::Result<danger::HandshakeSignatureValid, Error> {
         verify_tls13_signature(message, cert, dss, &self.0)
@@ -276,6 +269,6 @@ async fn connect(url: &str) -> Result<WsStream> {
     Ok(conn)
 }
 
-fn env_var(key: &'static str) -> Result<String> {
+fn env_var(key: &str) -> Result<String> {
     std::env::var(key).with_context(|| anyhow!("env var required: {key:?}"))
 }
