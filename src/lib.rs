@@ -147,9 +147,8 @@ impl Client {
     }
 
     pub async fn disconnect(&mut self) -> Result<()> {
-        let conn = match self.conn.as_mut() {
-            None => return Ok(()),
-            Some(conn) => conn,
+        let Some(conn) = self.conn.as_mut() else {
+            return Ok(());
         };
 
         let shutdown_result = timeout(self.opts.timeout, conn.close(None))
